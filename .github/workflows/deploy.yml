@@ -1,0 +1,51 @@
+name: Deploy to AWS
+
+# Controls when the action will run.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - webapp/**
+      - .github/workflows/deploy.yml
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  S3_DEPLOY_BUCKET: s3://dev-cvc-app
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  deploy_site:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./webapp
+    strategy:
+      max-parallel: 1
+    permissions:
+      id-token: write # required to be able to use AWS OIDC provider, https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services#adding-permissions-settings
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Capture deploy metadata
+        run: |
+          echo Run \#: ${{ github.run_number }} [ID: ${{ github.run_id }}] >> deploy.txt
+          echo User: ${{ github.triggering_actor }} >> deploy.txt
+          echo Deployed ref: ${{ github.ref_name }} >> deploy.txt
+          echo At commit: ${{ github.sha }} >> deploy.txt
+          echo On: $(TZ=UTC date +%Y-%m-%d\ %H:%M:%S\ UTC) >> deploy.txt
+      - name: Install dependencies
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Configure AWS credentials from Dev Account
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.ROLE_TO_ASSUME }}
+          aws-region: us-east-2
+      - name: Deploy
+        run: |
+          aws s3 sync ./dist $S3_DEPLOY_BUCKET
+          aws s3 cp deploy.txt $S3_DEPLOY_BUCKET --metadata-directive REPLACE --cache-control max-age=0,no-cache,no-store,must-revalidate
